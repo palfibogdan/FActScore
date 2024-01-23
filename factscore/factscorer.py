@@ -4,14 +4,19 @@ import json
 import numpy as np
 import os
 import logging
+import sys
+import pandas as pd
 
 from tqdm import tqdm
-from factscore.abstain_detection import is_response_abstained
-from factscore.atomic_facts import AtomicFactGenerator
-from factscore.clm import CLM
-from factscore.npm import NPM
-from factscore.openai_lm import OpenAIModel
-from factscore.retrieval import DocDB, Retrieval
+
+sys.path.append("factscore/FActScore/factscore")
+from abstain_detection import is_response_abstained
+from atomic_facts import AtomicFactGenerator
+from clm import CLM
+from npm import NPM
+from openai_lm import OpenAIModel
+from retrieval import DocDB, Retrieval
+
 
 class FactScorer(object):
 
@@ -24,13 +29,14 @@ class FactScorer(object):
                  cost_estimate="consider_cache",
                  abstain_detection_type=None,
                  batch_size=256):
-        assert model_name in ["retrieval+llama", "retrieval+llama+npm", "retrieval+ChatGPT", "npm", "retrieval+ChatGPT+npm"]
+        assert model_name in ["retrieval+llama", "retrieval+llama+npm", "retrieval+ChatGPT", "npm",
+                              "retrieval+ChatGPT+npm"]
         self.model_name = model_name
 
         self.db = {}
         self.retrieval = {}
         self.npm = {}
-        self.batch_size = batch_size # batch size for retrieval
+        self.batch_size = batch_size  # batch size for retrieval
         self.openai_key = openai_key
         self.abstain_detection_type = abstain_detection_type
 
@@ -82,7 +88,6 @@ class FactScorer(object):
                                  "npm-single",
                                  cache_file=os.path.join(self.cache_dir, f"npm-{name}.pkl"))
 
-
     def print_cost_estimates(self, total_words, task, model):
         # https://help.openai.com/en/articles/4936856-what-are-tokens-and-how-to-count-them
         # Number of tokens are roughly 4/3 of the number of words
@@ -99,7 +104,9 @@ class FactScorer(object):
         total_cost = total_tokens * rate / 1000
 
         # print the total words, tokens, and cost along with rate
-        logging.critical("Estimated OpenAI API cost for %s ($%.3f per 1000 tokens): $%.2f for %d words and %d tokens" % (task, rate, total_cost, total_words, total_tokens))
+        logging.critical(
+            "Estimated OpenAI API cost for %s ($%.3f per 1000 tokens): $%.2f for %d words and %d tokens" % (
+            task, rate, total_cost, total_words, total_tokens))
 
     def get_score(self,
                   topics,
@@ -107,6 +114,7 @@ class FactScorer(object):
                   gamma=10,
                   atomic_facts=None,
                   knowledge_source=None,
+                  contexts=None,
                   verbose=False):
         if knowledge_source is None:
             # use the default knowledge source
@@ -115,15 +123,16 @@ class FactScorer(object):
         if knowledge_source not in self.retrieval:
             self.register_knowledge_source(knowledge_source)
 
-        if type(topics)==type(generations)==str:
+        if type(topics) == type(generations) == str:
             topics = [topics]
             generations = [generations]
         else:
-            assert type(topics)==type(generations)==list, "`topics` and `generations` should be lists."
-            assert len(topics)==len(generations), "`topics` and `generations` should have the same length"
+            assert type(topics) == type(generations) == list, "`topics` and `generations` should be lists."
+            assert len(topics) == len(generations), "`topics` and `generations` should have the same length"
 
+        sentence_facts = {}
         if atomic_facts is not None:
-            assert len(topics)==len(atomic_facts), "`topics` and `atomic_facts` should have the same length"
+            assert len(topics) == len(atomic_facts), "`topics` and `atomic_facts` should have the same length"
         else:
             if self.af_generator is None:
                 self.af_generator = AtomicFactGenerator(key_path=self.openai_key,
@@ -149,15 +158,20 @@ class FactScorer(object):
                     continue
                 # continue only when the response is not abstained
                 curr_afs, _ = self.af_generator.run(gen)
+
+                for tuple in curr_afs:
+                    key, value = tuple
+                    sentence_facts[key] = value
+
                 curr_afs = [fact for _, facts in curr_afs for fact in facts]
-                if len(curr_afs)==0:
+                if len(curr_afs) == 0:
                     atomic_facts.append(None)
                 else:
                     atomic_facts.append(curr_afs)
                 if len(atomic_facts) % 10 == 0:
                     self.af_generator.save_cache()
 
-            assert len(atomic_facts)==len(topics)
+            assert len(atomic_facts) == len(topics)
             self.af_generator.save_cache()
 
         respond_ratio = np.mean([facts is not None for facts in atomic_facts])
@@ -165,9 +179,10 @@ class FactScorer(object):
         if "ChatGPT" in self.model_name:
             # estimate the total cost of response generation
             total_words = 0
-            for topic, generation, facts in zip(topics, generations, atomic_facts):
+            for topic, generation, facts, context in zip(topics, generations, atomic_facts, contexts):
                 if facts is not None:
-                    total_words += self._get_score(topic, generation, facts, knowledge_source, cost_estimate=self.cost_estimate)
+                    total_words += self._get_score(topic, generation, facts, knowledge_source,
+                                                   cost_estimate=self.cost_estimate, context=context)
 
             self.print_cost_estimates(total_words, task="factscore evaluation", model="gpt-3.5-turbo")
 
@@ -177,18 +192,18 @@ class FactScorer(object):
         scores = []
         init_scores = []
         decisions = []
-        for topic, generation, facts in zip(topics, generations, atomic_facts):
+        for topic, generation, facts, context in zip(topics, generations, atomic_facts, contexts):
             if facts is None:
                 decisions.append(None)
             else:
-                decision = self._get_score(topic, generation, facts, knowledge_source)
+                decision = self._get_score(topic, generation, facts, knowledge_source, context=context)
                 score = np.mean([d["is_supported"] for d in decision])
-                
+
                 if gamma:
                     init_scores.append(score)
-                    penalty = 1.0 if len(facts)>gamma else np.exp(1-gamma/len(facts))
+                    penalty = 1.0 if len(facts) > gamma else np.exp(1 - gamma / len(facts))
                     score = penalty * score
-                
+
                 decisions.append(decision)
                 scores.append(score)
                 if len(scores) % 10 == 0:
@@ -203,20 +218,25 @@ class FactScorer(object):
 
         if gamma:
             out["init_score"] = np.mean(init_scores)
-        
-        return out
 
-    def _get_score(self, topic, generation, atomic_facts, knowledge_source, cost_estimate=None):
+        return out, sentence_facts
+
+    def _get_score(self, topic, generation, atomic_facts, knowledge_source, cost_estimate=None, context=None):
         decisions = []
         total_words = 0
         for atom in atomic_facts:
             atom = atom.strip()
             if self.lm:
-                passages = self.retrieval[knowledge_source].get_passages(topic, atom, k=5)
                 definition = "Answer the question about {} based on the given context.\n\n".format(topic)
-                context = ""
-                for psg_idx, psg in enumerate(reversed(passages)):
-                    context += "Title: {}\nText: {}\n\n".format(psg["title"], psg["text"].replace("<s>", "").replace("</s>", ""))
+
+                # If context is not provided, use the retriever (only for factscore data)
+                if context is None:
+                    passages = self.retrieval[knowledge_source].get_passages(topic, atom, k=5)
+                    context = ""
+                    for psg_idx, psg in enumerate(reversed(passages)):
+                        context += "Title: {}\nText: {}\n\n".format(psg["title"],
+                                                                    psg["text"].replace("<s>", "").replace("</s>", ""))
+
                 definition += context.strip()
                 if not definition[-1] in string.punctuation:
                     definition += "."
@@ -231,7 +251,7 @@ class FactScorer(object):
 
                 output = self.lm.generate(prompt)
 
-                if type(output[1])==np.ndarray:
+                if type(output[1]) == np.ndarray:
                     # when logits are available
                     logits = np.array(output[1])
                     assert logits.shape[0] in [32000, 32001]
@@ -249,7 +269,9 @@ class FactScorer(object):
                         else:
                             is_supported = generated_answer.index("true") > generated_answer.index("false")
                     else:
-                        is_supported = all([keyword not in generated_answer.lower().translate(str.maketrans("", "", string.punctuation)).split() for keyword in ["not", "cannot", "unknown", "information"]])
+                        is_supported = all([keyword not in generated_answer.lower().translate(
+                            str.maketrans("", "", string.punctuation)).split() for keyword in
+                                            ["not", "cannot", "unknown", "information"]])
 
             else:
                 is_supported = True
@@ -264,6 +286,64 @@ class FactScorer(object):
             return total_words
         else:
             return decisions
+
+
+def get_selfcheck_topic(dp):
+    concept = ""
+    mid_names = ["of", "de", "van", "von", "the", "The"]
+    concept_list = dp["wiki_bio_text"].split(" ")
+    for string in concept_list:
+        if string in mid_names or string.isupper() or string[0].isupper():
+            if string[0] != "(":
+                concept += string + " "
+        else:
+            break
+
+    return concept.strip()
+
+
+def get_selfcheck_data(path):
+    data = json.load(open(path, "r"))
+    topics, generations, contexts = [], [], []
+
+    for idx, dp in enumerate(data):
+        topics.append(get_selfcheck_topic(dp))
+        generations.append(dp["gpt3_text"])
+        contexts.append(dp["wiki_bio_text"])
+
+    return topics, generations, contexts
+
+
+def get_scopus_data(path):
+
+    #TODO maybe try to remove the citation in order to not create atomic facts
+    hard_questions = ["potential of class activation mapping in cxr",
+                      "how does the percentage of agricultural products used for fish feed production in europe compare to other regions?",
+                      "what are some notable achievements or publications by roberta fusaro in her career?",
+                      "what is the process of water sowing and how does it differ from traditional methods of irrigation?"]
+
+    data = pd.read_feather(path)
+    topics, generations, contexts = [], [], []
+    for hq in hard_questions:
+        dp = data[data["query"] == hq].iloc[0]
+        topics.append(dp["query"])
+        generations.append(dp["summary"])
+        docs = list(dp["retrieved_documents"])
+        # "[1] Title:... Abstract:..., [2] Title:... Abstract:..."
+        # Maybe also adapt prompt
+        # context = ' '.join(f'{idx + 1}')
+        contexts.append(' '.join(docs))
+
+    for idx, dp in data.iterrows():
+        if idx == 10:
+            break
+        docs = list(dp["retrieved_documents"])
+        contexts.append(' '.join(docs))
+        generations.append(dp["summary"])
+        topics.append(dp["query"])
+
+    return topics, generations, contexts
+
 
 if __name__ == '__main__':
 
@@ -295,7 +375,6 @@ if __name__ == '__main__':
                         type=str,
                         default=None)
 
-
     parser.add_argument('--cost_estimate',
                         type=str,
                         default="consider_cache",
@@ -308,13 +387,15 @@ if __name__ == '__main__':
                         action="store_true")
     parser.add_argument('--verbose',
                         action="store_true",
-                        help="for printing out the progress bar")    
+                        help="for printing out the progress bar")
     parser.add_argument('--print_rate_limit_error',
                         action="store_true",
                         help="for printing out rate limit error when using OpenAI keys")
     parser.add_argument('--n_samples',
                         type=int,
                         default=None)
+    parser.add_argument('--dataset', type=str, default="factscore")
+    parser.add_argument('--human_facts', type=bool, default=False, help="Whether to use model atomic facts or human atomic facts from dataset")
 
     args = parser.parse_args()
 
@@ -331,36 +412,79 @@ if __name__ == '__main__':
                     abstain_detection_type=args.abstain_detection_type)
 
     tot = 0
-    topics, generations, atomic_facts = [], [], []
-    with open(args.input_path) as f:
-        for line in f:
-            dp = json.loads(line)
-            tot += 1
-            if args.use_atomic_facts:
-                assert "annotations" in dp, "You can specify `--use_atomic_facts` only when atomic facts are available in the input data already."
-                if dp["annotations"] is None:
-                    continue
-                topics.append(dp["topic"])
-                generations.append(dp["output"])
-                atomic_facts.append([atom["text"] for sent in dp["annotations"] for atom in sent["model-atomic-facts"]])
-            else:
-                topics.append(dp["topic"])
-                generations.append(dp["output"])
-            if args.n_samples is not None and tot==args.n_samples:
-                break
-    out = fs.get_score(topics=topics,
-                       generations=generations,
-                       gamma=args.gamma,
-                       atomic_facts=atomic_facts if args.use_atomic_facts else None,
-                       knowledge_source=args.knowledge_source,
-                       verbose=args.verbose)
-    logging.critical("FActScore = %.1f%%" % (100*out["score"]))
+
+    if args.dataset == "factscore":
+        topics, generations, atomic_facts = [], [], []
+        with open(args.input_path) as f:
+            for idx, line in enumerate(f):
+                dp = json.loads(line)
+                tot += 1
+                if args.use_atomic_facts:
+                    assert "annotations" in dp, "You can specify `--use_atomic_facts` only when atomic facts are available in the input data already."
+                    if dp["annotations"] is None:
+                        continue
+                    topics.append(dp["topic"])
+                    generations.append(dp["output"])
+
+                    if args.human_facts:
+                        fact_added = False
+                        atomic_list = []
+                        for sent in dp["annotations"]:
+                            if sent["human-atomic-facts"] is not None:
+                                fact_added = True
+                                for atom in sent["human-atomic-facts"]:
+                                    atomic_list.append(atom['text'])
+
+                        if not fact_added:
+                            del topics[-1]
+                            del generations[-1]
+                        else:
+                            atomic_facts.append(atomic_list)
+                    else:
+                        atomic_facts.append(
+                            [atom["text"] for sent in dp["annotations"] for atom in sent["model-atomic-facts"]])
+                else:
+                    topics.append(dp["topic"])
+                    generations.append(dp["output"])
+                if args.n_samples is not None and tot == args.n_samples:
+                    break
+        contexts = [None] * len(topics)
+    elif args.dataset == "selfcheck":
+        topics, generations, contexts = get_selfcheck_data(args.input_path)
+
+    elif args.dataset == "scopus":
+        topics, generations, contexts = get_scopus_data(args.input_path)
+
+    out, sentence_facts = fs.get_score(topics=topics,
+                                       generations=generations,
+                                       contexts=contexts,
+                                       gamma=args.gamma,
+                                       atomic_facts=atomic_facts if args.use_atomic_facts else None,
+                                       knowledge_source=args.knowledge_source,
+                                       verbose=args.verbose)
+    logging.critical("FActScore = %.1f%%" % (100 * out["score"]))
     if "init_score" in out:
-        logging.critical("FActScore w/o length penalty = %.1f%%" % (100*out["init_score"]))
-    logging.critical("Respond ratio = %.1f%%" % (100*out["respond_ratio"]))
+        logging.critical("FActScore w/o length penalty = %.1f%%" % (100 * out["init_score"]))
+    logging.critical("Respond ratio = %.1f%%" % (100 * out["respond_ratio"]))
     logging.critical("# Atomic facts per valid response = %.1f" % (out["num_facts_per_response"]))
 
     # Save out as a json file
-    with open(args.input_path.replace(".jsonl", f"_factscore_output.json"), 'w') as f:
-        f.write(json.dumps(out) + "\n")
+    if args.dataset == "factscore":
+        with open(args.input_path.replace(".jsonl", f"_factscore_output.json"), 'w') as f:
+            f.write(json.dumps(out) + "\n")
 
+        with open("data/atomic_facts/factscore_af.json", 'w') as f:
+            f.write(json.dumps(sentence_facts))
+    elif args.dataset == "selfcheck":
+        with open(args.input_path.replace(".json", f"_factscore_output.json"), 'w') as f:
+            f.write(json.dumps(out) + "\n")
+
+        with open("data/atomic_facts/selfcheck_af.json", 'w') as f:
+            f.write(json.dumps(sentence_facts))
+
+    elif args.dataset == "scopus":
+        with open(args.input_path.replace(".feather", f"_factscore_output.json"), 'w') as f:
+            f.write(json.dumps(out) + "\n")
+
+        with open("data/atomic_facts/scopus_af.json", 'w') as f:
+            f.write(json.dumps(sentence_facts))

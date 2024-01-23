@@ -22,6 +22,9 @@ class OpenAIModel(LM):
         with open(key_path, 'r') as f:
             api_key = f.readline()
         openai.api_key = api_key.strip()
+        openai.api_type = "azure"
+        openai.api_base = 'https://topicpages.openai.azure.com/'
+        openai.api_version = "2023-03-15-preview"
         self.model = self.model_name
 
     def _generate(self, prompt, max_sequence_length=2048, max_output_length=128):
@@ -35,7 +38,11 @@ class OpenAIModel(LM):
             # Call API
             response = call_ChatGPT(message, temp=self.temp, max_len=max_sequence_length)
             # Get the output from the response
-            output = response["choices"][0]["message"]["content"]
+            try:
+                output = response["choices"][0]["message"]["content"]
+            except:
+                output = "I cannot answer this question (not allowed)."
+                print(response)
             return output, response
         elif self.model_name == "InstructGPT":
             # Call API
@@ -53,19 +60,22 @@ def call_ChatGPT(message, model_name="gpt-3.5-turbo", max_len=1024, temp=0.7, ve
     num_rate_errors = 0
     while not received:
         try:
-            response = openai.ChatCompletion.create(model=model_name,
+            response = openai.ChatCompletion.create(engine="topicpages-qa",
+                                                    model=model_name,
                                                     messages=message,
                                                     max_tokens=max_len,
                                                     temperature=temp)
             received = True
         except:
-            # print(message)
+            print(message)
             num_rate_errors += 1
             error = sys.exc_info()[0]
             if error == openai.error.InvalidRequestError:
                 # something is wrong: e.g. prompt too long
                 logging.critical(f"InvalidRequestError\nPrompt passed in:\n\n{message}\n\n")
-                assert False
+                # assert False
+                response = {"choices": [{"message": {"content": "I cannot answer this question (not allowed)."}}]}
+                break
             
             logging.error("API error: %s (%d). Waiting %dsec" % (error, num_rate_errors, np.power(2, num_rate_errors)))
             time.sleep(np.power(2, num_rate_errors))
@@ -79,7 +89,8 @@ def call_GPT3(prompt, model_name="text-davinci-003", max_len=512, temp=0.7, num_
     num_rate_errors = 0
     while not received:
         try:
-            response = openai.Completion.create(model=model_name,
+            response = openai.Completion.create(engine=model_name,
+                                                model=model_name,
                                                 prompt=prompt,
                                                 max_tokens=max_len,
                                                 temperature=temp,
@@ -88,6 +99,7 @@ def call_GPT3(prompt, model_name="text-davinci-003", max_len=512, temp=0.7, num_
             received = True
         except:
             error = sys.exc_info()[0]
+            print(error)
             num_rate_errors += 1
             if error == openai.error.InvalidRequestError:
                 # something is wrong: e.g. prompt too long
