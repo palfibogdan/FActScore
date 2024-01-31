@@ -51,7 +51,8 @@ class LM(object):
                     with open(self.cache_file, "rb") as f:
                         cache = pickle.load(f)
                     break
-                except Exception:
+                except Exception as e:
+                    print(e)
                     if not allow_retry:
                         assert False
                     print ("Pickle Error: Retry in 5sec...")

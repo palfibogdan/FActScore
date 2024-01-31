@@ -4,9 +4,24 @@ from sklearn.metrics import precision_recall_fscore_support, accuracy_score
 import pandas as pd
 
 
+def get_refcheck_pred():
+    with open("/home/palfib/refchecker/results/refchecker_selfcheck_output.json", "r") as f:
+        results = json.load(f)
+
+    pred_hard = [True if x['Y'] == "Entailment" else False for x in results]
+    pred_easy = [True if x['Y'] == "Entailment" or x['Y'] == "Neutral" else False for x in results]
+
+    return pred_hard
+
+
 def aggregate_results(results_path, af_path):
     with open(results_path, 'r') as f:
         results = json.load(f)
+
+    results = list(itertools.chain.from_iterable(results['decisions']))
+    atom_list = [x["atom"] for x in results]
+    atom_list_copy = atom_list.copy()
+    results = [x["is_supported"] for x in results]
 
     with open(af_path, 'r') as f:
         af_dict = json.load(f)
@@ -15,13 +30,25 @@ def aggregate_results(results_path, af_path):
     for key in af_dict.keys():
         final_results[key] = []
 
-    for dp in results['decisions']:
-        for fact in dp:
-            for key, atoms in af_dict.items():
-                if fact["atom"] in atoms:
-                    final_results[key].append(fact["is_supported"])
-                    break
+    atoms_dict = []
+    for key, atoms in af_dict.items():
+        if key.startswith("In 2010, Hurley founded the heavy metal"):
+            print("HERE")
+        atoms_dict.append(atoms)
+        num_atoms = len(atoms)
 
+        if len(atom_list) > 0 and len(atoms) > 0:
+            while atom_list[0] != atoms[0]:
+                atom_list.pop(0)
+                results.pop(0)
+
+        for iter in range(num_atoms):
+            atom = atom_list.pop(0)
+            final_results[key].append(results.pop(0))
+
+    atoms_dict = list(itertools.chain.from_iterable(atoms_dict))
+    if atom_list_copy == atoms_dict:
+        print("TRUE")
     return final_results
 
 
@@ -32,10 +59,12 @@ def get_gt(data, pred_sentences, data_name):
         annotations = list(itertools.chain.from_iterable(annotations))
         sentences = [x["gpt3_sentences"] for x in data]
         sentences = list(itertools.chain.from_iterable(sentences))
+
         for idx, sentence in enumerate(sentences):
             if sentence not in pred_sentences:
                 sentences.pop(idx)
                 annotations.pop(idx)
+
         gt = [True if x == "accurate" else False for x in annotations]
         return gt
     elif data_name == "factscore":
@@ -77,7 +106,7 @@ def get_gt(data, pred_sentences, data_name):
 
 
 data_name = "selfcheck"
-aggreagation = "soft"  # soft, strict
+aggreagation = "strict"  # soft, strict
 
 if data_name == "selfcheck":
     results_path = "/home/palfib/factscore/results/dataset_selfcheck_factscore_output.json"
@@ -107,6 +136,13 @@ if data_name == "selfcheck":
 
     gt = get_gt(data, list(pred_sentence), data_name)
 
+    ext_knowledge = []
+    for dp in data:
+        ext_knowledge.append(dp["wiki_bio_text"])
+
+    with open("/home/palfib/factscore/data/selfcheck_ext_knowledge.json", 'w') as f:
+        json.dump(ext_knowledge, f, indent=4)
+
 else:
     results_path = "results/ChatGPT_factscore_output.json"
 
@@ -126,10 +162,14 @@ else:
     pred = [x for idx, x in enumerate(pred)]
 
 # if gt and pred are not the same, print the decision key
-# for idx, (gt_val, pred_val) in enumerate(zip(gt, pred)):
-#     if gt_val != pred_val:
-#         print(list(decisions.keys())[idx], gt_val, pred_val)
-#         a = 2
+refcheck_pred = get_refcheck_pred()
+gt.pop(1115)
+pred.pop(1115)
+for idx, (gt_val, pred_val) in enumerate(zip(gt, pred)):
+    if gt_val != pred_val and pred_val == True:
+        print(idx, list(decisions.keys())[idx], "GT: ", gt_val, " FAct: ", pred_val, " Ref:", refcheck_pred[idx] )
+
+
 
 (precision, recall, f1, _) = precision_recall_fscore_support(gt, pred, average='binary', pos_label=True,
                                                              zero_division=1.0)
@@ -140,3 +180,6 @@ print("Rec: ", recall)
 print("F1: ", f1)
 print("Acc: ", accuracy)
 print("Done")
+
+with open("/home/palfib/factscore/results/dataset_selfcheck_factscore_output.json", 'r') as f:
+    results_old = json.load(f)

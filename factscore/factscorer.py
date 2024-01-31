@@ -16,6 +16,7 @@ from clm import CLM
 from npm import NPM
 from openai_lm import OpenAIModel
 from retrieval import DocDB, Retrieval
+from data_utils import get_scopus_data, get_selfcheck_data
 
 
 class FactScorer(object):
@@ -249,7 +250,7 @@ class FactScorer(object):
                         total_words += len(prompt.split())
                     continue
 
-                output = self.lm.generate(prompt)
+                output = self.lm.generate(prompt, max_sequence_length=5)
 
                 if type(output[1]) == np.ndarray:
                     # when logits are available
@@ -269,9 +270,10 @@ class FactScorer(object):
                         else:
                             is_supported = generated_answer.index("true") > generated_answer.index("false")
                     else:
-                        is_supported = all([keyword not in generated_answer.lower().translate(
-                            str.maketrans("", "", string.punctuation)).split() for keyword in
-                                            ["not", "cannot", "unknown", "information"]])
+                        # is_supported = all([keyword not in generated_answer.lower().translate(
+                        #     str.maketrans("", "", string.punctuation)).split() for keyword in
+                        #                     ["not", "cannot", "unknown", "information"]])
+                        is_supported = False
 
             else:
                 is_supported = True
@@ -286,63 +288,6 @@ class FactScorer(object):
             return total_words
         else:
             return decisions
-
-
-def get_selfcheck_topic(dp):
-    concept = ""
-    mid_names = ["of", "de", "van", "von", "the", "The"]
-    concept_list = dp["wiki_bio_text"].split(" ")
-    for string in concept_list:
-        if string in mid_names or string.isupper() or string[0].isupper():
-            if string[0] != "(":
-                concept += string + " "
-        else:
-            break
-
-    return concept.strip()
-
-
-def get_selfcheck_data(path):
-    data = json.load(open(path, "r"))
-    topics, generations, contexts = [], [], []
-
-    for idx, dp in enumerate(data):
-        topics.append(get_selfcheck_topic(dp))
-        generations.append(dp["gpt3_text"])
-        contexts.append(dp["wiki_bio_text"])
-
-    return topics, generations, contexts
-
-
-def get_scopus_data(path):
-
-    #TODO maybe try to remove the citation in order to not create atomic facts
-    hard_questions = ["potential of class activation mapping in cxr",
-                      "how does the percentage of agricultural products used for fish feed production in europe compare to other regions?",
-                      "what are some notable achievements or publications by roberta fusaro in her career?",
-                      "what is the process of water sowing and how does it differ from traditional methods of irrigation?"]
-
-    data = pd.read_feather(path)
-    topics, generations, contexts = [], [], []
-    for hq in hard_questions:
-        dp = data[data["query"] == hq].iloc[0]
-        topics.append(dp["query"])
-        generations.append(dp["summary"])
-        docs = list(dp["retrieved_documents"])
-        # "[1] Title:... Abstract:..., [2] Title:... Abstract:..."
-        # Maybe also adapt prompt
-        # context = ' '.join(f'{idx + 1}')
-        contexts.append(' '.join(docs))
-
-    for idx, dp in data.iterrows():
-        if idx == 10:
-            break
-        docs = list(dp["retrieved_documents"])
-        contexts.append(' '.join(docs))
-        generations.append(dp["summary"])
-        topics.append(dp["query"])
-
-    return topics, generations, contexts
 
 
 if __name__ == '__main__':
