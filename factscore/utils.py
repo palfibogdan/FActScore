@@ -5,10 +5,10 @@
 # LICENSE file in the root directory of this source tree.
 import torch
 
-def assert_all_approx_close(a, b, rtol, atol, count):
 
+def assert_all_approx_close(a, b, rtol, atol, count):
     idx = torch.isclose(a.float(), b.float(), rtol, atol)
-    sumval = (idx==0).sum().item()
+    sumval = (idx == 0).sum().item()
     if sumval > count:
         print(f'Too many values not close: assert {sumval} < {count}')
         try:
@@ -59,6 +59,7 @@ class QuantizedLinearInt8(torch.nn.Module):
         - a bit slower because of the added computation of dequantization in each forward pass. In practice, the slowdown
             is not large because in the generation application, gpu utilization is not very high.
     '''
+
     def __init__(self, linear_layer):
         super().__init__()
         self.bias = linear_layer.bias
@@ -71,11 +72,11 @@ class QuantizedLinearInt8(torch.nn.Module):
         )
         # print(self.weight_scale.max().item(), self.weight_scale.min().item(), self.weight_scale.mean().item())
         # if self.weight_scale.max().item() > 0.002:
-            # print(self.weight_scale.max().item())
+        # print(self.weight_scale.max().item())
         self.weight = torch.nn.Parameter(
             torch.round(weight.float() / self.weight_scale[:, None]).char(),
             requires_grad=False
-            )
+        )
 
     def forward(self, x):
         weight = self.weight.half() * self.weight_scale[:, None]
@@ -98,9 +99,36 @@ def convert_model_to_int8_on_gpu(model, device):
     model.to(device=device)
     memory_after_quantization = get_memory_footprint(model)  # without lm_head
 
-    saving = round(100 * memory_after_quantization/memory_before_quantization)
-    memory_before_quantization = round(memory_before_quantization / 2**30, 2)  # rounding for printing
-    memory_after_quantization = round(memory_after_quantization / 2**30, 2)  # rounding for printing
+    saving = round(100 * memory_after_quantization / memory_before_quantization)
+    memory_before_quantization = round(memory_before_quantization / 2 ** 30, 2)  # rounding for printing
+    memory_after_quantization = round(memory_after_quantization / 2 ** 30, 2)  # rounding for printing
 
-    print(f'Quantization memory - before: {memory_before_quantization} GB, after: {memory_after_quantization} GB ({saving}% of the size before)')
+    print(
+        f'Quantization memory - before: {memory_before_quantization} GB, after: {memory_after_quantization} GB ({saving}% of the size before)')
     return model
+
+
+def get_prompt(context, topic, fact):
+    prompt_format = """I have a claim (atomic fact) that was made by a language model with regards to a specific topic.
+        Please help me check whether the claim is supported by the provided reference, which is related to the topic. 
+        The reference is a retrieved paragraph about the topic, and the claim is represented as an atomic fact (single sentence).
+
+        If the claim is supported by ANY part of the reference, answer 'True'. 
+        If the claim is contradicted by ANY part of the reference, answer 'False'.
+        If the reference is not relevant to the claim or DOES NOT contain information to verify the claim, answer 'False'. 
+
+        Please DO NOT use your own knowledge for the judgement, just compare the reference and the claim to get the answer.
+
+        ### Topic:
+        {topic}
+
+        ### Reference:
+        {reference}
+
+        ### Claim:
+        {claim}
+
+        Your answer should be only a single word in ['True', 'False']
+        """
+
+    return prompt_format.format(topic=topic, reference=fact, claim=context)

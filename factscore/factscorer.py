@@ -15,8 +15,10 @@ from atomic_facts import AtomicFactGenerator
 from clm import CLM
 from npm import NPM
 from openai_lm import OpenAIModel
+from zephyr_lm import Zephyr
 from retrieval import DocDB, Retrieval
 from data_utils import get_scopus_data, get_selfcheck_data
+from utils import get_prompt
 
 
 class FactScorer(object):
@@ -29,9 +31,10 @@ class FactScorer(object):
                  openai_key="api.key",
                  cost_estimate="consider_cache",
                  abstain_detection_type=None,
-                 batch_size=256):
+                 batch_size=256,
+                 new_prompt=False):
         assert model_name in ["retrieval+llama", "retrieval+llama+npm", "retrieval+ChatGPT", "npm",
-                              "retrieval+ChatGPT+npm"]
+                              "retrieval+ChatGPT+npm", "Zephyr"]
         self.model_name = model_name
 
         self.db = {}
@@ -48,6 +51,7 @@ class FactScorer(object):
 
         self.af_generator = None
         self.cost_estimate = cost_estimate
+        self.new_prompt = new_prompt
 
         if "llama" in model_name:
             self.lm = CLM("inst-llama-7B",
@@ -57,6 +61,10 @@ class FactScorer(object):
             self.lm = OpenAIModel("ChatGPT",
                                   cache_file=os.path.join(cache_dir, "ChatGPT.pkl"),
                                   key_path=openai_key)
+        elif "Zephyr" in model_name:
+            self.lm = Zephyr(cache_file=os.path.join(cache_dir, "Zephyr.pkl"))
+        elif "npm" in model_name:
+            self.lm = None
         else:
             self.lm = None
 
@@ -107,7 +115,7 @@ class FactScorer(object):
         # print the total words, tokens, and cost along with rate
         logging.critical(
             "Estimated OpenAI API cost for %s ($%.3f per 1000 tokens): $%.2f for %d words and %d tokens" % (
-            task, rate, total_cost, total_words, total_tokens))
+                task, rate, total_cost, total_words, total_tokens))
 
     def get_score(self,
                   topics,
@@ -121,8 +129,8 @@ class FactScorer(object):
             # use the default knowledge source
             knowledge_source = "enwiki-20230401"
 
-        if knowledge_source not in self.retrieval:
-            self.register_knowledge_source(knowledge_source)
+        # if knowledge_source not in self.retrieval:
+        #     self.register_knowledge_source(knowledge_source)
 
         if type(topics) == type(generations) == str:
             topics = [topics]
@@ -228,7 +236,6 @@ class FactScorer(object):
         for atom in atomic_facts:
             atom = atom.strip()
             if self.lm:
-                definition = "Answer the question about {} based on the given context.\n\n".format(topic)
 
                 # If context is not provided, use the retriever (only for factscore data)
                 if context is None:
@@ -237,11 +244,20 @@ class FactScorer(object):
                     for psg_idx, psg in enumerate(reversed(passages)):
                         context += "Title: {}\nText: {}\n\n".format(psg["title"],
                                                                     psg["text"].replace("<s>", "").replace("</s>", ""))
+                if self.new_prompt:
+                    prompt = get_prompt(topic, atom, context)
+                else:
+                    definition = "Answer the question about {} based on the given context.\n\n".format(topic)
 
-                definition += context.strip()
-                if not definition[-1] in string.punctuation:
-                    definition += "."
-                prompt = "{}\n\nInput: {} True or False?\nOutput:".format(definition.strip(), atom.strip())
+                    definition += context.strip()
+                    if not definition[-1] in string.punctuation:
+                        definition += "."
+
+                    if self.model_name == "Zephyr":
+                        prompt = "{}\n\nInput: {} Is this statement True or False? Answer with just True or False. \nOutput:".format(
+                            definition.strip(), atom.strip())
+                    else:
+                        prompt = "{}\n\nInput: {} True or False?\nOutput:".format(definition.strip(), atom.strip())
 
                 if cost_estimate:
                     if cost_estimate == "consider_cache" and (prompt.strip() + "_0") not in self.lm.cache_dict:
@@ -340,7 +356,8 @@ if __name__ == '__main__':
                         type=int,
                         default=None)
     parser.add_argument('--dataset', type=str, default="factscore")
-    parser.add_argument('--human_facts', type=bool, default=False, help="Whether to use model atomic facts or human atomic facts from dataset")
+    parser.add_argument('--human_facts', type=bool, default=False,
+                        help="Whether to use model atomic facts or human atomic facts from dataset")
 
     args = parser.parse_args()
 
@@ -421,10 +438,17 @@ if __name__ == '__main__':
         with open("data/atomic_facts/factscore_af.json", 'w') as f:
             f.write(json.dumps(sentence_facts))
     elif args.dataset == "selfcheck":
-        with open(args.input_path.replace(".json", f"_factscore_output.json"), 'w') as f:
+        if args.model_name == "Zephyr":
+            out_path = "_factscore_zephyr_output.json"
+            at_path = "selfcheck_zephyr_af.json"
+        else:
+            out_path = "_factscore_output.json"
+            at_path = "selfcheck_af.json"
+
+        with open(args.input_path.replace(".json", out_path), 'w') as f:
             f.write(json.dumps(out) + "\n")
 
-        with open("data/atomic_facts/selfcheck_af.json", 'w') as f:
+        with open(f"data/atomic_facts/{at_path}", 'w') as f:
             f.write(json.dumps(sentence_facts))
 
     elif args.dataset == "scopus":

@@ -9,9 +9,11 @@ def get_refcheck_pred():
         results = json.load(f)
 
     pred_hard = [True if x['Y'] == "Entailment" else False for x in results]
-    pred_easy = [True if x['Y'] == "Entailment" or x['Y'] == "Neutral" else False for x in results]
+    triplets = [x["triplets"] for x in results]
+    pred_triplets = [x["ys"] for x in results]
+    responses = [x["response"] for x in results]
 
-    return pred_hard
+    return pred_hard, triplets, pred_triplets, responses
 
 
 def aggregate_results(results_path, af_path):
@@ -109,7 +111,7 @@ data_name = "selfcheck"
 aggreagation = "strict"  # soft, strict
 
 if data_name == "selfcheck":
-    results_path = "/home/palfib/factscore/results/dataset_selfcheck_factscore_output.json"
+    results_path = "/home/palfib/factscore/results/dataset_selfcheck_factscore_zephyr_output.json"
     af_path = "/home/palfib/factscore/results/selfcheck_af.json"
     data = json.load(open("/home/palfib/factscore/data/dataset_selfcheck.json", 'r'))
 
@@ -143,6 +145,21 @@ if data_name == "selfcheck":
     with open("/home/palfib/factscore/data/selfcheck_ext_knowledge.json", 'w') as f:
         json.dump(ext_knowledge, f, indent=4)
 
+    refcheck_pred, triplets, pred_triplets, responses = get_refcheck_pred()
+    # gt.pop(1115)
+    # pred.pop(1115)
+    # for idx, (gt_val, pred_val) in enumerate(zip(gt, pred)):
+    #     if gt_val != pred_val and pred_val == False:
+    #         sentence = list(decisions.keys())[idx]
+    #         idx_ref = responses.index(sentence)
+    #         print(idx, sentence, "GT: ", gt_val, " FAct: ", pred_val, " Ref:", refcheck_pred[idx_ref])
+    #         print(af_dict[sentence])
+    #         print(final_results[sentence])
+    #
+    #         print(triplets[idx_ref])
+    #         print(pred_triplets[idx_ref])
+    #         print("\n")
+
 else:
     results_path = "results/ChatGPT_factscore_output.json"
 
@@ -162,15 +179,6 @@ else:
     pred = [x for idx, x in enumerate(pred)]
 
 # if gt and pred are not the same, print the decision key
-refcheck_pred = get_refcheck_pred()
-gt.pop(1115)
-pred.pop(1115)
-for idx, (gt_val, pred_val) in enumerate(zip(gt, pred)):
-    if gt_val != pred_val and pred_val == True:
-        print(idx, list(decisions.keys())[idx], "GT: ", gt_val, " FAct: ", pred_val, " Ref:", refcheck_pred[idx] )
-
-
-
 (precision, recall, f1, _) = precision_recall_fscore_support(gt, pred, average='binary', pos_label=True,
                                                              zero_division=1.0)
 accuracy = accuracy_score(gt, pred)

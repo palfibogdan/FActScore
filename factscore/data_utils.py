@@ -20,6 +20,8 @@ def get_selfcheck_data(path):
     topics, generations, contexts = [], [], []
 
     for idx, dp in enumerate(data):
+        if idx == 10:
+            break
         topics.append(get_selfcheck_topic(dp))
         generations.append(dp["gpt3_text"])
         contexts.append(dp["wiki_bio_text"])
