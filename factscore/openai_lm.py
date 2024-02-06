@@ -6,6 +6,7 @@ import os
 import numpy as np
 import logging
 
+
 class OpenAIModel(LM):
 
     def __init__(self, model_name, cache_file=None, key_path="api.key"):
@@ -19,12 +20,21 @@ class OpenAIModel(LM):
         # load api key
         key_path = self.key_path
         assert os.path.exists(key_path), f"Please place your OpenAI APT Key in {key_path}."
+
         with open(key_path, 'r') as f:
             api_key = f.readline()
+
         openai.api_key = api_key.strip()
-        openai.api_type = "azure"
-        openai.api_base = 'https://topicpages.openai.azure.com/'
-        openai.api_version = "2023-03-15-preview"
+        if self.model_name == "ChatGPT":
+            openai.api_type = "azure"
+            openai.api_base = 'https://topicpages.openai.azure.com/'
+            openai.api_version = "2023-03-15-preview"
+        elif self.model_name == "GPT4":
+            openai.api_type = "azure"
+            openai.api_base = "https://els-sdanswers-innovation.openai.azure.com/"
+            openai.api_version = "2023-07-01-preview"
+            os.environ["OPENAI_API_KEY"] = api_key.strip()
+
         self.model = self.model_name
 
     def _generate(self, prompt, max_sequence_length=2048, max_output_length=128):
@@ -50,8 +60,21 @@ class OpenAIModel(LM):
             # Get the output from the response
             output = response["choices"][0]["text"]
             return output, response
+        elif self.model == "GPT4":
+            # Construct the prompt send to GPT4
+            message = [{"role": "user", "content": prompt}]
+            # Call API
+            response = call_ChatGPT(message, model_name="gpt4", temp=self.temp, max_len=max_sequence_length)
+            # Get the output from the response
+            try:
+                output = response["choices"][0]["message"]["content"]
+            except:
+                output = "I cannot answer this question (not allowed)."
+                print(response)
+            return output, response
         else:
             raise NotImplementedError()
+
 
 def call_ChatGPT(message, model_name="gpt-3.5-turbo", max_len=1024, temp=0.7, verbose=False):
     # call GPT-3 API until result is provided and then return it
@@ -60,13 +83,20 @@ def call_ChatGPT(message, model_name="gpt-3.5-turbo", max_len=1024, temp=0.7, ve
     num_rate_errors = 0
     while not received:
         try:
-            response = openai.ChatCompletion.create(engine="topicpages-qa",
-                                                    model=model_name,
-                                                    messages=message,
-                                                    max_tokens=max_len,
-                                                    temperature=temp)
+            if model_name == "gpt-3.5-turbo":
+                response = openai.ChatCompletion.create(engine="topicpages-qa",
+                                                        model=model_name,
+                                                        messages=message,
+                                                        max_tokens=max_len,
+                                                        temperature=temp)
+            else:
+                response = openai.ChatCompletion.create(engine="gpt-4",
+                                                        messages=message,
+                                                        max_tokens=max_len,
+                                                        temperature=temp)
             received = True
-        except:
+        except Exception as e:
+            print(e)
             print(message)
             num_rate_errors += 1
             error = sys.exc_info()[0]
@@ -76,7 +106,7 @@ def call_ChatGPT(message, model_name="gpt-3.5-turbo", max_len=1024, temp=0.7, ve
                 # assert False
                 response = {"choices": [{"message": {"content": "I cannot answer this question (not allowed)."}}]}
                 break
-            
+
             logging.error("API error: %s (%d). Waiting %dsec" % (error, num_rate_errors, np.power(2, num_rate_errors)))
             time.sleep(np.power(2, num_rate_errors))
     return response

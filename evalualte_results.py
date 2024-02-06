@@ -107,79 +107,87 @@ def get_gt(data, pred_sentences, data_name):
         return gt, no_annotations
 
 
+
+
+def get_gt_pred(data_name, aggregation):
+    if data_name == "selfcheck":
+        results_path = "/home/palfib/factscore/results/dataset_selfcheck_factscore_output.json"
+        af_path = "/home/palfib/factscore/results/selfcheck_af.json"
+        data = json.load(open("/home/palfib/factscore/data/dataset_selfcheck.json", 'r'))
+
+        final_results = aggregate_results(results_path, af_path)
+
+        # for all results, if the dictionary contains false then it is not supported
+        decisions = {}
+        if aggreagation == 'strict':
+            for key, value in final_results.items():
+                if False in value:
+                    decisions[key] = False
+                else:
+                    decisions[key] = True
+        else:
+            for key, value in final_results.items():
+                num_true = value.count(True)
+                num_false = value.count(False)
+                decisions[key] = True if num_true > num_false and num_false < 2 else False
+        pred = list(decisions.values())
+
+        with open(af_path, 'r') as f:
+            af_dict = json.load(f)
+        pred_sentence = af_dict.keys()
+
+        gt = get_gt(data, list(pred_sentence), data_name)
+
+        ext_knowledge = []
+        for dp in data:
+            ext_knowledge.append(dp["wiki_bio_text"])
+
+        with open("/home/palfib/factscore/data/selfcheck_ext_knowledge.json", 'w') as f:
+            json.dump(ext_knowledge, f, indent=4)
+
+        refcheck_pred, triplets, pred_triplets, responses = get_refcheck_pred()
+        # gt.pop(1115)
+        # pred.pop(1115)
+        # for idx, (gt_val, pred_val) in enumerate(zip(gt, pred)):
+        #     if gt_val != pred_val and pred_val == False:
+        #         sentence = list(decisions.keys())[idx]
+        #         idx_ref = responses.index(sentence)
+        #         print(idx, sentence, "GT: ", gt_val, " FAct: ", pred_val, " Ref:", refcheck_pred[idx_ref])
+        #         print(af_dict[sentence])
+        #         print(final_results[sentence])
+        #
+        #         print(triplets[idx_ref])
+        #         print(pred_triplets[idx_ref])
+        #         print("\n")
+
+    else:
+        results_path = "results/ChatGPT_factscore_output.json"
+
+        # af_path = "/home/palfib/factscore/results/selfcheck_af.json"
+        data = pd.read_json("/home/palfib/factscore/data/labeled/ChatGPT.jsonl", lines=True)
+        with open(results_path, 'r') as f:
+            results = json.load(f)
+        pred = []
+        atoms_pred = []
+        for dp in results['decisions']:
+            for fact in dp:
+                pred.append(fact["is_supported"])
+                atoms_pred.append(fact["atom"])
+
+        gt, no_annotation = get_gt(data, atoms_pred, data_name)
+        # pred = [x for idx, x in enumerate(pred) if idx not in no_annotation]
+        pred = [x for idx, x in enumerate(pred)]
+
+    return gt, pred
+
+
 data_name = "selfcheck"
 aggreagation = "strict"  # soft, strict
 
-if data_name == "selfcheck":
-    results_path = "/home/palfib/factscore/results/dataset_selfcheck_factscore_zephyr_output.json"
-    af_path = "/home/palfib/factscore/results/selfcheck_af.json"
-    data = json.load(open("/home/palfib/factscore/data/dataset_selfcheck.json", 'r'))
-
-    final_results = aggregate_results(results_path, af_path)
-
-    # for all results, if the dictionary contains false then it is not supported
-    decisions = {}
-    if aggreagation == 'strict':
-        for key, value in final_results.items():
-            if False in value:
-                decisions[key] = False
-            else:
-                decisions[key] = True
-    else:
-        for key, value in final_results.items():
-            num_true = value.count(True)
-            num_false = value.count(False)
-            decisions[key] = True if num_true > num_false and num_false < 2 else False
-    pred = list(decisions.values())
-
-    with open(af_path, 'r') as f:
-        af_dict = json.load(f)
-    pred_sentence = af_dict.keys()
-
-    gt = get_gt(data, list(pred_sentence), data_name)
-
-    ext_knowledge = []
-    for dp in data:
-        ext_knowledge.append(dp["wiki_bio_text"])
-
-    with open("/home/palfib/factscore/data/selfcheck_ext_knowledge.json", 'w') as f:
-        json.dump(ext_knowledge, f, indent=4)
-
-    refcheck_pred, triplets, pred_triplets, responses = get_refcheck_pred()
-    # gt.pop(1115)
-    # pred.pop(1115)
-    # for idx, (gt_val, pred_val) in enumerate(zip(gt, pred)):
-    #     if gt_val != pred_val and pred_val == False:
-    #         sentence = list(decisions.keys())[idx]
-    #         idx_ref = responses.index(sentence)
-    #         print(idx, sentence, "GT: ", gt_val, " FAct: ", pred_val, " Ref:", refcheck_pred[idx_ref])
-    #         print(af_dict[sentence])
-    #         print(final_results[sentence])
-    #
-    #         print(triplets[idx_ref])
-    #         print(pred_triplets[idx_ref])
-    #         print("\n")
-
-else:
-    results_path = "results/ChatGPT_factscore_output.json"
-
-    # af_path = "/home/palfib/factscore/results/selfcheck_af.json"
-    data = pd.read_json("/home/palfib/factscore/data/labeled/ChatGPT.jsonl", lines=True)
-    with open(results_path, 'r') as f:
-        results = json.load(f)
-    pred = []
-    atoms_pred = []
-    for dp in results['decisions']:
-        for fact in dp:
-            pred.append(fact["is_supported"])
-            atoms_pred.append(fact["atom"])
-
-    gt, no_annotation = get_gt(data, atoms_pred, data_name)
-    # pred = [x for idx, x in enumerate(pred) if idx not in no_annotation]
-    pred = [x for idx, x in enumerate(pred)]
+gt, pred = get_gt_pred(data_name, aggreagation)
 
 # if gt and pred are not the same, print the decision key
-(precision, recall, f1, _) = precision_recall_fscore_support(gt, pred, average='binary', pos_label=True,
+(precision, recall, f1, _) = precision_recall_fscore_support(gt, pred, average='binary', pos_label=False,
                                                              zero_division=1.0)
 accuracy = accuracy_score(gt, pred)
 
@@ -189,5 +197,3 @@ print("F1: ", f1)
 print("Acc: ", accuracy)
 print("Done")
 
-with open("/home/palfib/factscore/results/dataset_selfcheck_factscore_output.json", 'r') as f:
-    results_old = json.load(f)

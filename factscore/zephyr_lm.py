@@ -1,3 +1,6 @@
+import os
+os.environ["HF_HOME"] = "/nlp/cache/huggingface/"
+
 from lm import LM
 import torch
 from transformers import pipeline

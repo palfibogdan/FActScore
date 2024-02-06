@@ -108,8 +108,8 @@ def convert_model_to_int8_on_gpu(model, device):
     return model
 
 
-def get_prompt(context, topic, fact):
-    prompt_format = """I have a claim (atomic fact) that was made by a language model with regards to a specific topic.
+def get_prompt(topic, context, fact):
+    prompt_format = """I have a claim that was made by a language model with regards to a specific topic.
         Please help me check whether the claim is supported by the provided reference, which is related to the topic. 
         The reference is a retrieved paragraph about the topic, and the claim is represented as an atomic fact (single sentence).
 
@@ -131,4 +131,4 @@ def get_prompt(context, topic, fact):
         Your answer should be only a single word in ['True', 'False']
         """
 
-    return prompt_format.format(topic=topic, reference=fact, claim=context)
+    return prompt_format.format(topic=topic, reference=context, claim=fact)

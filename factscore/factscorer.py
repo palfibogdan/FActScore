@@ -34,7 +34,7 @@ class FactScorer(object):
                  batch_size=256,
                  new_prompt=False):
         assert model_name in ["retrieval+llama", "retrieval+llama+npm", "retrieval+ChatGPT", "npm",
-                              "retrieval+ChatGPT+npm", "Zephyr"]
+                              "retrieval+ChatGPT+npm", "Zephyr", "GPT4"]
         self.model_name = model_name
 
         self.db = {}
@@ -60,6 +60,10 @@ class FactScorer(object):
         elif "ChatGPT" in model_name:
             self.lm = OpenAIModel("ChatGPT",
                                   cache_file=os.path.join(cache_dir, "ChatGPT.pkl"),
+                                  key_path=openai_key)
+        elif "GPT4" in model_name:
+            self.lm = OpenAIModel("GPT4",
+                                  cache_file=os.path.join(cache_dir, "gpt-4.pkl"),
                                   key_path=openai_key)
         elif "Zephyr" in model_name:
             self.lm = Zephyr(cache_file=os.path.join(cache_dir, "Zephyr.pkl"))
@@ -144,9 +148,17 @@ class FactScorer(object):
             assert len(topics) == len(atomic_facts), "`topics` and `atomic_facts` should have the same length"
         else:
             if self.af_generator is None:
+                if "ChatGPT" in self.model_name or "Zephyr" in self.model_name:
+                    af_cache_file = os.path.join(self.cache_dir, "InstructGPT.pkl")
+                elif "GPT4" in self.model_name:
+                    #TODO change this if you want GPT4 AF
+                    af_cache_file = os.path.join(self.cache_dir, "InstructGPT.pkl")
+                else:
+                    af_cache_file = ".cache/factscore/atomic_facts.pkl"
+                name = "ChatGPT" if "ChatGPT" in self.model_name else "ChatGPT" if "Zephyr" in self.model_name else "GPT4"
                 self.af_generator = AtomicFactGenerator(key_path=self.openai_key,
-                                                        demon_dir=os.path.join(self.data_dir, "demos"),
-                                                        gpt3_cache_file=os.path.join(self.cache_dir, "InstructGPT.pkl"))
+                                                        demon_dir=os.path.join(self.data_dir, "demos"), model_name=name,
+                                                        gpt3_cache_file=af_cache_file)
 
             # estimate the total cost of atomic fact generation
             total_words = 0
@@ -245,7 +257,7 @@ class FactScorer(object):
                         context += "Title: {}\nText: {}\n\n".format(psg["title"],
                                                                     psg["text"].replace("<s>", "").replace("</s>", ""))
                 if self.new_prompt:
-                    prompt = get_prompt(topic, atom, context)
+                    prompt = get_prompt(topic, context, atom)
                 else:
                     definition = "Answer the question about {} based on the given context.\n\n".format(topic)
 
@@ -358,6 +370,7 @@ if __name__ == '__main__':
     parser.add_argument('--dataset', type=str, default="factscore")
     parser.add_argument('--human_facts', type=bool, default=False,
                         help="Whether to use model atomic facts or human atomic facts from dataset")
+    parser.add_argument('--new_prompt', type=bool, default=False, help="Whether to use new prompt or old prompt")
 
     args = parser.parse_args()
 
@@ -371,7 +384,8 @@ if __name__ == '__main__':
                     cache_dir=args.cache_dir,
                     openai_key=args.openai_key,
                     cost_estimate=args.cost_estimate,
-                    abstain_detection_type=args.abstain_detection_type)
+                    abstain_detection_type=args.abstain_detection_type,
+                    new_prompt=args.new_prompt)
 
     tot = 0
 
@@ -441,6 +455,9 @@ if __name__ == '__main__':
         if args.model_name == "Zephyr":
             out_path = "_factscore_zephyr_output.json"
             at_path = "selfcheck_zephyr_af.json"
+        elif args.model_name == "GPT4":
+            out_path = "_factscore_gpt4_output.json"
+            at_path = "selfcheck_gpt4_af.json"
         else:
             out_path = "_factscore_output.json"
             at_path = "selfcheck_af.json"
