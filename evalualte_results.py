@@ -34,8 +34,6 @@ def aggregate_results(results_path, af_path):
 
     atoms_dict = []
     for key, atoms in af_dict.items():
-        if key.startswith("In 2010, Hurley founded the heavy metal"):
-            print("HERE")
         atoms_dict.append(atoms)
         num_atoms = len(atoms)
 
@@ -63,9 +61,13 @@ def get_gt(data, pred_sentences, data_name):
         sentences = list(itertools.chain.from_iterable(sentences))
 
         for idx, sentence in enumerate(sentences):
-            if sentence not in pred_sentences:
+            if sentence != pred_sentences[idx]:
                 sentences.pop(idx)
                 annotations.pop(idx)
+
+        # for pred, orig in zip(pred_sentences, sentences):
+        #     if pred != orig:
+        #         print(pred, orig)
 
         gt = [True if x == "accurate" else False for x in annotations]
         return gt
@@ -111,7 +113,7 @@ def get_gt(data, pred_sentences, data_name):
 
 def get_gt_pred(data_name, aggregation):
     if data_name == "selfcheck":
-        results_path = "/home/palfib/factscore/results/dataset_selfcheck_factscore_output.json"
+        results_path = "/home/palfib/factscore/results/dataset_selfcheck_factscore_zephyr_new_prompt2_output.json"
         af_path = "/home/palfib/factscore/results/selfcheck_af.json"
         data = json.load(open("/home/palfib/factscore/data/dataset_selfcheck.json", 'r'))
 
@@ -142,8 +144,21 @@ def get_gt_pred(data_name, aggregation):
         for dp in data:
             ext_knowledge.append(dp["wiki_bio_text"])
 
-        with open("/home/palfib/factscore/data/selfcheck_ext_knowledge.json", 'w') as f:
-            json.dump(ext_knowledge, f, indent=4)
+        sent = []
+        for dp in data:
+            sent.append(dp["gpt3_sentences"])
+
+        sent = list(itertools.chain.from_iterable(sent))
+        with open("/home/palfib/factscore/data/sentences.txt", 'w') as f:
+            for s_e, s_o in zip (list(pred_sentence), sent):
+                # if s_e != s_o:
+                f.write(s_e + "\n")
+                f.write(s_o + "\n")
+                f.write("\n")
+
+
+        # with open("/home/palfib/factscore/data/selfcheck_ext_knowledge.json", 'w') as f:
+        #     json.dump(ext_knowledge, f, indent=4)
 
         refcheck_pred, triplets, pred_triplets, responses = get_refcheck_pred()
         # gt.pop(1115)
@@ -187,13 +202,21 @@ aggreagation = "strict"  # soft, strict
 gt, pred = get_gt_pred(data_name, aggreagation)
 
 # if gt and pred are not the same, print the decision key
-(precision, recall, f1, _) = precision_recall_fscore_support(gt, pred, average='binary', pos_label=False,
+(precision, recall, f1, _) = precision_recall_fscore_support(gt, pred, average='binary', pos_label=True,
                                                              zero_division=1.0)
 accuracy = accuracy_score(gt, pred)
-
+print("Pos Label: True")
 print("Prec: ", precision)
 print("Rec: ", recall)
 print("F1: ", f1)
 print("Acc: ", accuracy)
 print("Done")
 
+(precision, recall, f1, _) = precision_recall_fscore_support(gt, pred, average='binary', pos_label=False,
+                                                             zero_division=1.0)
+print("Pos Label: False")
+print("Prec: ", precision)
+print("Rec: ", recall)
+print("F1: ", f1)
+print("Acc: ", accuracy)
+print("Done")

@@ -42,30 +42,35 @@ class AtomicFactGenerator(object):
         self.openai_lm.save_cache()
 
     def run(self, generation, cost_estimate=None):
+        #TODO get sentences from SelfCheck
         """Convert the generation into a set of atomic facts. Return a total words cost if cost_estimate != None."""
-        assert isinstance(generation, str), "generation must be a string"
-        paragraphs = [para.strip() for para in generation.split("\n") if len(para.strip()) > 0]
-        return self.get_atomic_facts_from_paragraph(paragraphs, cost_estimate=cost_estimate)
+        if type(generation) == "str":
+            assert isinstance(generation, str), "generation must be a string"
+            paragraphs = [para.strip() for para in generation.split("\n") if len(para.strip()) > 0]
+            return self.get_atomic_facts_from_paragraph(paragraphs, cost_estimate=cost_estimate)
+        else:
+            return self.get_atomic_facts_from_paragraph(None, generation, cost_estimate=cost_estimate)
 
-    def get_atomic_facts_from_paragraph(self, paragraphs, cost_estimate=None):
-        sentences = []
+    def get_atomic_facts_from_paragraph(self, paragraphs, sentences = None, cost_estimate=None):
         para_breaks = []
-        for para_idx, paragraph in enumerate(paragraphs):
-            if para_idx > 0 :
-                para_breaks.append(len(sentences))
+        if sentences == None:
+            sentences = []
+            for para_idx, paragraph in enumerate(paragraphs):
+                if para_idx > 0 :
+                    para_breaks.append(len(sentences))
 
-            initials = detect_initials(paragraph)
+                initials = detect_initials(paragraph)
 
-            curr_sentences = sent_tokenize(paragraph)
-            curr_sentences_2 = sent_tokenize(paragraph)
+                curr_sentences = sent_tokenize(paragraph)
+                curr_sentences_2 = sent_tokenize(paragraph)
 
-            curr_sentences = fix_sentence_splitter(curr_sentences, initials)
-            curr_sentences_2 = fix_sentence_splitter(curr_sentences_2, initials)
+                curr_sentences = fix_sentence_splitter(curr_sentences, initials)
+                curr_sentences_2 = fix_sentence_splitter(curr_sentences_2, initials)
 
-            # checking this, just to ensure the crediability of the sentence splitter fixing algorithm
-            assert curr_sentences == curr_sentences_2, (paragraph, curr_sentences, curr_sentences_2)
+                # checking this, just to ensure the crediability of the sentence splitter fixing algorithm
+                assert curr_sentences == curr_sentences_2, (paragraph, curr_sentences, curr_sentences_2)
 
-            sentences += curr_sentences
+                sentences += curr_sentences
 
         atoms_or_estimate = self.get_init_atomic_facts_from_sentence([sent for i, sent in enumerate(sentences) if not (not self.is_bio and ( \
                             (i==0 and (sent.startswith("Sure") or sent.startswith("Here are"))) or \

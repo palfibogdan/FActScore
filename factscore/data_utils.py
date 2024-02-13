@@ -21,7 +21,7 @@ def get_selfcheck_data(path):
 
     for idx, dp in enumerate(data):
         topics.append(get_selfcheck_topic(dp))
-        generations.append(dp["gpt3_text"])
+        generations.append(dp["gpt3_sentences"])
         contexts.append(dp["wiki_bio_text"])
 
     return topics, generations, contexts

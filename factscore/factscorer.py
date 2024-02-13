@@ -10,15 +10,15 @@ import pandas as pd
 from tqdm import tqdm
 
 sys.path.append("factscore/FActScore/factscore")
+from zephyr_lm import Zephyr
 from abstain_detection import is_response_abstained
 from atomic_facts import AtomicFactGenerator
 from clm import CLM
 from npm import NPM
 from openai_lm import OpenAIModel
-from zephyr_lm import Zephyr
 from retrieval import DocDB, Retrieval
 from data_utils import get_scopus_data, get_selfcheck_data
-from utils import get_prompt
+from prompts import get_prompt
 
 
 class FactScorer(object):
@@ -266,7 +266,7 @@ class FactScorer(object):
                         definition += "."
 
                     if self.model_name == "Zephyr":
-                        prompt = "{}\n\nInput: {} Is this statement True or False? Answer with just True or False. \nOutput:".format(
+                        prompt = "{}\n\nInput: {} Is this statement True or False? Answer using a single word in [\"True\", \"False\"]. \nOutput:".format(
                             definition.strip(), atom.strip())
                     else:
                         prompt = "{}\n\nInput: {} True or False?\nOutput:".format(definition.strip(), atom.strip())
@@ -278,7 +278,7 @@ class FactScorer(object):
                         total_words += len(prompt.split())
                     continue
 
-                output = self.lm.generate(prompt, max_sequence_length=5)
+                output = self.lm.generate(prompt, max_sequence_length=3)
 
                 if type(output[1]) == np.ndarray:
                     # when logits are available
@@ -438,6 +438,8 @@ if __name__ == '__main__':
                                        atomic_facts=atomic_facts if args.use_atomic_facts else None,
                                        knowledge_source=args.knowledge_source,
                                        verbose=args.verbose)
+
+    print("START PRINTING")
     logging.critical("FActScore = %.1f%%" % (100 * out["score"]))
     if "init_score" in out:
         logging.critical("FActScore w/o length penalty = %.1f%%" % (100 * out["init_score"]))

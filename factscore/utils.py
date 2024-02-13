@@ -108,27 +108,34 @@ def convert_model_to_int8_on_gpu(model, device):
     return model
 
 
-def get_prompt(topic, context, fact):
-    prompt_format = """I have a claim that was made by a language model with regards to a specific topic.
-        Please help me check whether the claim is supported by the provided reference, which is related to the topic. 
-        The reference is a retrieved paragraph about the topic, and the claim is represented as an atomic fact (single sentence).
 
-        If the claim is supported by ANY part of the reference, answer 'True'. 
-        If the claim is contradicted by ANY part of the reference, answer 'False'.
-        If the reference is not relevant to the claim or DOES NOT contain information to verify the claim, answer 'False'. 
+#TIPS:
+# Use delimiters <>, ``` ```
+# Prompt the model to ouput stuff in JSON format
+# few shot prompting
+# specify steps to complete task,
+# instruct model to work out its own solution before conclusion
+# (own idea: maybe try to prompt the model to find what part of the context is relevant
+# to the claim, if no part is to answer False. Then to output that part and given that part, to
+# reach a conclusion )
 
-        Please DO NOT use your own knowledge for the judgement, just compare the reference and the claim to get the answer.
-
-        ### Topic:
-        {topic}
-
-        ### Reference:
-        {reference}
-
-        ### Claim:
-        {claim}
-
-        Your answer should be only a single word in ['True', 'False']
-        """
-
-    return prompt_format.format(topic=topic, reference=context, claim=fact)
+#    prompt_format = """
+#         <START REFERENCE> The sky is blue. <END REFERENCE>
+#         Answer whether the following claim is "True" or "False":
+#         <START CLAIM> The sky is red. <END CLAIM>
+#         <ANSWER> False <ANSWER>
+#
+#         <START REFERENCE> The sky is red. <END REFERENCE>
+#         Answer whether the following claim is "True" or "False":
+#         <START CLAIM> The sky is red. <END CLAIM>
+#         <ANSWER> True <ANSWER>
+#
+#         Given the following reference about {topic}:
+#         <START REFERENCE> {reference} <END REFERENCE>
+#         Answer whether the following claim is "True" or "False":
+#         <START CLAIM> {claim} <END CLAIM>
+#         """
+# def get_prompt(topic, context, fact):
+#
+#     prompt = prompt_format.format(topic=topic, reference=context, claim=fact)
+#     return prompt
